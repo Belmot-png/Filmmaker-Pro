@@ -1,0 +1,278 @@
+"""
+
+BEM-VINDO AO FILMMAKER PRO.
+
+Este módulo implementa um assistente criador de roteiros altamente criativos e detalhados
+utilizando a API do Google Gemini. Este agente irá criar roteiros a partir da letra da música que você enviar.
+
+Autor: Leoni Santos "Belmot"
+Data: Maio de 2025
+Versão: 3.0
+
+"""
+
+import sys
+
+# Configura a API Key do Google Gemini
+import os
+from google.colab import userdata
+
+# Tenta obter a GOOGLE_API_KEY, avisa se não encontrar
+try:
+    api_key_value = userdata.get('GOOGLE_API_KEY')
+    if api_key_value is None:
+        raise ValueError("GOOGLE_API_KEY não encontrada no Colab Secrets. Por favor, adicione-a.")
+    os.environ["GOOGLE_API_KEY"] = api_key_value
+    # print("GOOGLE_API_KEY carregada com sucesso!")
+except Exception as e:
+    print(f"Erro ao carregar GOOGLE_API_KEY: {e}")
+    print("Certifique-se de que a chave 'GOOGLE_API_KEY' existe e está acessível no Colab Secrets.")
+
+# Configura o cliente da SDK do Gemini
+import google.generativeai as genai
+
+try:
+    if 'api_key_value' in locals() and api_key_value:
+        genai.configure(api_key=api_key_value)
+except Exception as e:
+    print(f"Erro durante a configuração inicial do GenAI: {e}. Verifique sua API Key e configuração.")
+
+MODEL_ID = "gemini-2.0-flash"
+ADK_MODEL_ID = MODEL_ID
+
+# Imports do ADK e outros
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
+import textwrap
+from IPython.display import display, Markdown
+import warnings
+import traceback # Para logs de erro mais detalhados
+
+warnings.filterwarnings("ignore")
+
+# Função auxiliar que envia uma mensagem para um agente via Runner e retorna a resposta final
+def call_agent(agent: Agent, message_text: str, session_id_suffix: str = "agent_call") -> str:
+    session_service = InMemorySessionService()
+    session_id = f"session_{agent.name.lower().replace(' ', '_')}_{session_id_suffix}"
+    session = session_service.create_session(app_name=agent.name, user_id="user1", session_id=session_id)
+    runner = Runner(agent=agent, app_name=agent.name, session_service=session_service)
+    content = genai_types.Content(role="user", parts=[genai_types.Part(text=message_text)])
+
+    final_response = ""
+    # print(f"Processando com o agente '{agent.name}' (Sessão: {session_id})...")
+    try:
+        for event in runner.run(user_id="user1", session_id=session_id, new_message=content):
+            if event.is_final_response():
+              for part in event.content.parts:
+                if part.text is not None:
+                  final_response += part.text
+                  final_response += "\n"
+    except Exception as e:
+        print(f"Erro durante a execução do agente '{agent.name}': {e}")
+        traceback.print_exc() # Imprime o traceback completo do erro
+        return f"Erro ao processar a solicitação com o agente '{agent.name}'."
+    return final_response.strip()
+
+# Função auxiliar para exibir texto formatado em Markdown no Colab
+def to_markdown(text):
+  text = text.replace('•', '  *')
+  text = text.replace('**1. Análise da Letra:**', '\n## 1. Análise da Letra\n')
+  text = text.replace('**2. Ideias de Sinopses:**', '\n## 2. Ideias de Sinopses\n')
+  text = text.replace('**3. Sugestões para o Conceito Visual:**', '\n## 3. Sugestões para o Conceito Visual\n')
+  return Markdown(textwrap.indent(text, '> ', predicate=lambda _: True))
+
+# --- Coletando Inputs do Usuário ---
+print("--- Assistente Criativo de Pré-Produção para Videoclipes ---")
+print("\nPor favor, cole a letra da música. Quando terminar, pressione Enter, digite 'FIM' em uma nova linha e pressione Enter novamente:")
+letra_musica_lines = []
+while True:
+    try:
+        line = input()
+        if line.strip().upper() == 'FIM':
+            break
+        letra_musica_lines.append(line)
+    except EOFError:
+        print("\nEntrada de letra interrompida.")
+        break
+if not 'letra_musica' in globals():
+    letra_musica = "\n".join(letra_musica_lines).strip()
+
+
+if not letra_musica:
+    print("\nNenhuma letra foi inserida. Encerrando.")
+else:
+    print("\nLetra da música recebida!")
+    print("\nInputs Adicionais (Opcional para refinar as sugestões):")
+    genero_musical = input("Gênero musical (ex: Pop, Rock, Hip Hop): ").strip()
+    humor_desejado = input("Humor desejado para o clipe (ex: Energético, Melancólico, Sonhador): ").strip()
+    palavras_chave_adicionais = input("Palavras-chave adicionais ou temas específicos (separados por vírgula): ").strip()
+
+    # --- Definindo as Instruções Gerais do Agente ---
+    agent_instructions = """
+    Você é um diretor de videoclipes e roteirista altamente criativo e experiente.
+    Sua especialidade é traduzir a essência de uma música em conceitos visuais impactantes e narrativas envolventes.
+    Ao receber uma letra de música e informações contextuais, sua tarefa é gerar um roteiro de pré-produção detalhado,
+    incluindo análise da letra, sinopses criativas e sugestões visuais abrangentes.
+    Seja inspirador, prático e forneça ideias que possam ser efetivamente produzidas.
+    Organize sua resposta em seções claras e bem definidas, como:
+    1. Análise da Letra
+    2. Ideias de Sinopses
+    3. Sugestões para o Conceito Visual
+    """
+
+    # --- Preparando a MENSAGEM ESPECÍFICA da tarefa para o Agente ---
+    mensagem_especifica_tarefa = f"""
+    Por favor, atue como um assistente criativo para a pré-produção de um videoclipe.
+    Analise a letra da música fornecida e, com base nela e nas informações adicionais, gere:
+    1.  Uma análise da letra (emoção principal, temas, palavras-chave).
+    2.  3 ideias de sinopses curtas para o videoclipe.
+    3.  Sugestões para o conceito visual (paleta de cores, atmosfera/estilo, locações, elementos simbólicos).
+
+    --- Letra da Música ---
+    {letra_musica}
+    --- Fim da Letra ---
+
+    --- Informações Adicionais ---
+    Gênero Musical: {genero_musical if genero_musical else 'Não especificado'}
+    Humor Desejado para o Clipe: {humor_desejado if humor_desejado else 'Não especificado'}
+    Palavras-chave Adicionais: {palavras_chave_adicionais if palavras_chave_adicionais else 'Nenhuma'}
+    --- Fim das Informações Adicionais ---
+
+    Por favor, apresente a análise, as sinopses e as sugestões visuais de forma clara e separada.
+    """
+
+    mensagem_completa_para_agente = f"""{agent_instructions}
+
+---
+TAREFA ATUAL:
+{mensagem_especifica_tarefa}
+"""
+
+    # --- Criando o Agente ---
+    print("\nConfigurando o agente criativo...")
+    try:
+        produtor_videoclipe_agent = Agent(
+            name="ProdutorDeVideoclipes",
+            model=ADK_MODEL_ID
+        )
+        print("\nGerando roteiro para sua música... Isso pode levar alguns instantes.")
+        roteiro_gerado = call_agent(
+            agent=produtor_videoclipe_agent,
+            message_text=mensagem_completa_para_agente,
+            session_id_suffix="ideias_iniciais"
+        )
+
+        # --- Exibindo o Roteiro ---
+        print("\n--- Roteiro do Videoclipe Gerado ---")
+        if roteiro_gerado and "Erro ao processar" not in roteiro_gerado:
+            display(to_markdown(roteiro_gerado))
+        elif not roteiro_gerado:
+            print("O agente não retornou nenhuma resposta.")
+        else:
+            print(roteiro_gerado) # Exibe a mensagem de erro do call_agent
+
+    except Exception as e:
+        print(f"Ocorreu um erro inesperado ao criar ou chamar o agente ProdutorDeVideoclipes: {e}")
+        traceback.print_exc() # Imprime o traceback completo do erro
+        print("Verifique a API Key, o nome do modelo e as configurações do agente.")
+        print("Se o erro persistir, pode ser necessário verificar a documentação da versão específica do google-adk que você está usando.")
+        roteiro_gerado = "" # Garante que roteiro_gerado existe para a próxima condição
+
+
+        # ==============================================================================
+            # INÍCIO DO BLOCO DE CÓDIGO PARA O SEGUNDO AGENTE (REFINADOR DE ROTEIRO)
+        # ==============================================================================
+
+if 'roteiro_gerado' in globals() and roteiro_gerado and "Erro ao processar" not in roteiro_gerado:
+    print("\n--- Iniciando o Refinador de Roteiro ---")
+
+    # Input do usuário para guiar o refinamento (obrigatório para o Agente 2 focar)
+    print("\nO Agente 1 gerou algumas ideias. Para o Agente 2 refinar, por favor, forneça direcionamento:")
+    sinopse_foco = input("Qual sinopse do Agente 1 você mais gostou (ex: 'a primeira', 'a que fala sobre X') ou qual tema principal deve ser o foco?: ").strip()
+    if not sinopse_foco:
+        sinopse_foco = "O agente deve escolher a sinopse mais promissora ou combinar elementos para criar o melhor roteiro possível."
+
+    feedback_adicional_agente2 = input("Algum feedback adicional ou elementos específicos que você gostaria de ver no roteiro refinado? (ex: 'mais cenas de dança', 'foco em flashbacks', 'usar uma paleta de cores fria'): ").strip()
+
+    agent2_instructions = """
+    Você é um roteirista de videoclipes sênior e diretor de arte, especializado em transformar conceitos iniciais em roteiros detalhados e visualmente estimulantes.
+    Sua tarefa é analisar o material conceitual fornecido (análise da letra, sinopses, sugestões visuais) e o feedback específico do usuário.
+    Com base nisso, desenvolva UM roteiro de videoclipe coeso e elaborado.
+
+    FOCO PRINCIPAL: Utilize o direcionamento do usuário sobre qual sinopse ou tema focar. Se o usuário não especificar, use seu julgamento para selecionar a ideia mais forte ou combinar elementos de forma criativa.
+
+    O ROTEIRO DETALHADO DEVE INCLUIR:
+    1.  **Título Provisório para o Clipe.**
+    2.  **Logline Curta:** Uma frase que resume a história do clipe.
+    3.  **Estrutura de Cenas:** Divida a música em seções lógicas (ex: INTRO, VERSO 1, REFRÃO 1, VERSO 2, REFRÃO 2, PONTE, SOLO, REFRÃO FINAL, OUTRO). Numere as cenas.
+    4.  **Para cada Cena:**
+        *   **CABEÇALHO DA CENA:** (Ex: CENA 1 - EXT. FLORESTA AO AMANHECER - DIA)
+        *   **DESCRIÇÃO VISUAL:** Ambiente, iluminação, atmosfera, paleta de cores predominante.
+        *   **AÇÃO:** O que acontece na cena. Movimentos de câmera sugeridos, ações dos personagens (se houver).
+        *   **ELEMENTOS SIMBÓLICOS/ADEREÇOS IMPORTANTES:** Destaque quaisquer elementos visuais que reforcem o tema ou a letra.
+        *   **TRANSIÇÃO PARA PRÓXIMA CENA:** (Opcional, se houver uma ideia específica).
+    5.  **Considerações Adicionais:** Breves notas sobre figurino, maquiagem ou efeitos especiais, se relevantes.
+
+    Seja criativo, prático e certifique-se de que o roteiro visual complementa a música e as ideias originais, incorporando o feedback do usuário.
+    O objetivo é um roteiro que inspire e guie a equipe de produção.
+    """
+
+    mensagem_para_agente2 = f"""
+    {agent2_instructions}
+
+    --- CONTEXTO DAS IDEIAS INICIAIS (GERADO PELO AGENTE 1) ---
+    {roteiro_gerado}
+    --- FIM DO CONTEXTO DAS IDEIAS INICIAIS ---
+
+    --- DIRECIONAMENTO E FEEDBACK DO USUÁRIO PARA ESTE REFINAMENTO ---
+    Foco principal/Sinopse escolhida: {sinopse_foco}
+    Feedback adicional: {feedback_adicional_agente2 if feedback_adicional_agente2 else "Nenhum feedback adicional específico."}
+    --- FIM DO DIRECIONAMENTO E FEEDBACK ---
+
+    TAREFA:
+    Com base em TODO o material acima (contexto do Agente 1 + direcionamento/feedback do usuário), gere o roteiro detalhado conforme as instruções.
+    """
+
+    try:
+        roteirista_refinador_agent = Agent(
+            name="RoteiristaRefinadorDetalhado",
+            model=ADK_MODEL_ID,
+            # temperature=0.6
+        )
+
+        print("\nGerando roteiro refinado... Isso pode levar alguns instantes.")
+        roteiro_final_detalhado = call_agent(
+            agent=roteirista_refinador_agent,
+            message_text=mensagem_para_agente2,
+            session_id_suffix="roteiro_detalhado"
+        )
+
+        print("\n--- Roteiro do Videoclipe Detalhado (Gerado pelo Agente 2) ---")
+        if roteiro_final_detalhado and "Erro ao processar" not in roteiro_final_detalhado:
+            display(to_markdown(roteiro_final_detalhado))
+        elif not roteiro_final_detalhado:
+            print("O Agente 2 (RoteiristaRefinadorDetalhado) não retornou nenhuma resposta.")
+        else:
+            print(roteiro_final_detalhado) # Exibe a mensagem de erro do call_agent
+
+    except Exception as e:
+        print(f"\nOcorreu um erro inesperado ao criar ou chamar o Agente 2: {e}")
+        traceback.print_exc() # Imprime o traceback completo do erro
+        print("Verifique as configurações do agente, a API Key e a disponibilidade do modelo.")
+
+    print("\n--- Processo de Geração de Roteiro Detalhado Concluído ---")
+
+else:
+    print("\nNão foi possível prosseguir para o Agente 2 pois não há resultado válido do Agente 1.")
+    if 'roteiro_gerado' in globals() and roteiro_gerado:
+        print(f"Conteúdo de 'roteiro_gerado' (início): {roteiro_gerado[:200]}...")
+    elif 'roteiro_gerado' in globals() and not roteiro_gerado:
+        print("'roteiro_gerado' está vazio ou None.")
+    else:
+        print("'roteiro_gerado' não foi definido.")
+
+# ============================================================================
+# FIM DO BLOCO DE CÓDIGO PARA O SEGUNDO AGENTE
+# ============================================================================
