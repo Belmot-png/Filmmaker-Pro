@@ -12,6 +12,7 @@ Versão: 3.0
 """
 
 import sys
+!pip install -q google-adk
 
 # Configura a API Key do Google Gemini
 import os
